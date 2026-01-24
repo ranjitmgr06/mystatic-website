@@ -35,7 +35,7 @@ jobs:
 
         echo "Current CloudFront status: $STATUS"
 
-        if [ "$STATUS" != "Deployed" ]; then
+        if [ "$STATUS" != "Active" ]; then
           echo "CloudFront distribution is not active. Updating status..."
           aws cloudfront update-distribution \
             --id $CLOUDFRONT_DIST_ID \
