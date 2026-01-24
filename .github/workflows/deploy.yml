@@ -27,50 +27,53 @@ jobs:
       if: env.CLOUDFRONT_DIST_ID != ''
       env:
         CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
-      run: |
-        STATUS=$(aws cloudfront get-distribution \
+        run: |
+          STATUS=$(aws cloudfront get-distribution \
           --id $CLOUDFRONT_DIST_ID \
           --query "Distribution.Status" \
           --output text)
 
-        ENABLED=$(aws cloudfront get-distribution \
-          --id $CLOUDFRONT_DIST_ID \
-          --query "Distribution.DistributionConfig.Enabled" \
-          --output text)
-
-        echo "Current CloudFront status: $STATUS"
-        echo "Current CloudFront enabled flag: $ENABLED"
-
-        if [ "$STATUS" != "Deployed" ]; then
-          echo "CloudFront distribution is not deployed. Waiting..."
-          aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
-        fi
-
-        if [ "$ENABLED" != "True" ]; then
-          echo "CloudFront distribution is disabled. Enabling it..."
-          CONFIG_FILE=config.json
-          aws cloudfront get-distribution-config \
+          ENABLED=$(aws cloudfront get-distribution \
             --id $CLOUDFRONT_DIST_ID \
-            --output json > $CONFIG_FILE
-
-          # Use jq to set Enabled=true
-          UPDATED_CONFIG=$(jq '.DistributionConfig.Enabled = true' $CONFIG_FILE)
-
-          ETAG=$(aws cloudfront get-distribution-config \
-            --id $CLOUDFRONT_DIST_ID \
-            --query "ETag" \
+            --query "Distribution.DistributionConfig.Enabled" \
             --output text)
 
-          echo "$UPDATED_CONFIG" > $CONFIG_FILE
+          echo "Current CloudFront status: $STATUS"
+          echo "Current CloudFront enabled flag: $ENABLED"
 
-          aws cloudfront update-distribution \
-            --id $CLOUDFRONT_DIST_ID \
-            --distribution-config file://$CONFIG_FILE \
-            --if-match $ETAG
+          if [ "$STATUS" != "Deployed" ]; then
+            echo "CloudFront distribution is not deployed. Waiting..."
+            aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
+          fi
 
-          echo "Waiting for CloudFront distribution to be deployed after enabling..."
-          aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
-        fi
+          if [ "$ENABLED" != "True" ]; then
+            echo "CloudFront distribution is disabled. Enabling it..."
+
+            # Extract DistributionConfig only
+            aws cloudfront get-distribution-config \
+              --id $CLOUDFRONT_DIST_ID \
+              --output json \
+              > dist-config.json
+
+            ETAG=$(aws cloudfront get-distribution-config \
+              --id $CLOUDFRONT_DIST_ID \
+              --query "ETag" \
+              --output text)
+
+            # Use jq to set Enabled=true inside DistributionConfig
+            UPDATED_CONFIG=$(jq '.DistributionConfig.Enabled = true | .DistributionConfig' dist-config.json)
+
+            echo "$UPDATED_CONFIG" > dist-config.json
+
+            aws cloudfront update-distribution \
+              --id $CLOUDFRONT_DIST_ID \
+              --distribution-config file://dist-config.json \
+              --if-match $ETAG
+
+            echo "Waiting for CloudFront distribution to be deployed after enabling..."
+            aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
+          fi
+      fi
 
     - name: Invalidate CloudFront cache
       if: env.CLOUDFRONT_DIST_ID != ''
