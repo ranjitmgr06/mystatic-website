@@ -23,6 +23,29 @@ jobs:
       run: |
         aws s3 sync ./frontend s3://${{ secrets.S3_BUCKET }} --delete
 
+    - name: Verify CloudFront distribution status
+      if: env.CLOUDFRONT_DIST_ID != ''
+      env:
+        CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
+      run: |
+        STATUS=$(aws cloudfront get-distribution \
+          --id $CLOUDFRONT_DIST_ID \
+          --query "Distribution.Status" \
+          --output text)
+
+        echo "Current CloudFront status: $STATUS"
+
+        if [ "$STATUS" != "Deployed" ]; then
+          echo "CloudFront distribution is not active. Updating status..."
+          aws cloudfront update-distribution \
+            --id $CLOUDFRONT_DIST_ID \
+            --distribution-config "$(aws cloudfront get-distribution-config --id $CLOUDFRONT_DIST_ID --output json)" \
+            --if-match $(aws cloudfront get-distribution-config --id $CLOUDFRONT_DIST_ID --query "ETag" --output text)
+          
+          echo "Waiting for CloudFront distribution to become active..."
+          aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
+        fi
+
     - name: Invalidate CloudFront cache
       if: env.CLOUDFRONT_DIST_ID != ''
       env:
