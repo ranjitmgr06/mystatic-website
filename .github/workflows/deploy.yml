@@ -23,7 +23,7 @@ jobs:
       run: |
         aws s3 sync ./frontend s3://${{ secrets.S3_BUCKET }} --delete
 
-    - name: Verify CloudFront distribution status
+    - name: Verify CloudFront distribution status and enable if needed
       if: env.CLOUDFRONT_DIST_ID != ''
       env:
         CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
@@ -33,16 +33,42 @@ jobs:
           --query "Distribution.Status" \
           --output text)
 
-        echo "Current CloudFront status: $STATUS"
+        ENABLED=$(aws cloudfront get-distribution \
+          --id $CLOUDFRONT_DIST_ID \
+          --query "Distribution.DistributionConfig.Enabled" \
+          --output text)
 
-        if [ "$STATUS" != "Active" ]; then
-          echo "CloudFront distribution is not active. Updating status..."
+        echo "Current CloudFront status: $STATUS"
+        echo "Current CloudFront enabled flag: $ENABLED"
+
+        if [ "$STATUS" != "Deployed" ]; then
+          echo "CloudFront distribution is not deployed. Waiting..."
+          aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
+        fi
+
+        if [ "$ENABLED" != "True" ]; then
+          echo "CloudFront distribution is disabled. Enabling it..."
+          CONFIG_FILE=config.json
+          aws cloudfront get-distribution-config \
+            --id $CLOUDFRONT_DIST_ID \
+            --output json > $CONFIG_FILE
+
+          # Use jq to set Enabled=true
+          UPDATED_CONFIG=$(jq '.DistributionConfig.Enabled = true' $CONFIG_FILE)
+
+          ETAG=$(aws cloudfront get-distribution-config \
+            --id $CLOUDFRONT_DIST_ID \
+            --query "ETag" \
+            --output text)
+
+          echo "$UPDATED_CONFIG" > $CONFIG_FILE
+
           aws cloudfront update-distribution \
             --id $CLOUDFRONT_DIST_ID \
-            --distribution-config "$(aws cloudfront get-distribution-config --id $CLOUDFRONT_DIST_ID --output json)" \
-            --if-match $(aws cloudfront get-distribution-config --id $CLOUDFRONT_DIST_ID --query "ETag" --output text)
-          
-          echo "Waiting for CloudFront distribution to become active..."
+            --distribution-config file://$CONFIG_FILE \
+            --if-match $ETAG
+
+          echo "Waiting for CloudFront distribution to be deployed after enabling..."
           aws cloudfront wait distribution-deployed --id $CLOUDFRONT_DIST_ID
         fi
 
